@@ -1,7 +1,10 @@
 from django import forms
-from .models import Reschedule
+from django.utils import timezone
+from datetime import datetime, timedelta
 from django.core.exceptions import ValidationError
-from .models import Teacher
+from .models import Reschedule, Teacher
+
+
 
 class RescheduleForm(forms.ModelForm):
     is_online = forms.TypedChoiceField(
@@ -10,50 +13,49 @@ class RescheduleForm(forms.ModelForm):
         widget=forms.RadioSelect
     )
 
+    selected_slot = forms.ChoiceField(
+        choices=[],  # filled dynamically
+        required=False
+    )
+
+    new_start_time = forms.TimeField(required=False, widget=forms.TimeInput(attrs={'type': 'time'}))
+    new_end_time = forms.TimeField(required=False, widget=forms.TimeInput(attrs={'type': 'time'}))
+
     class Meta:
         model = Reschedule
-        fields = [
-            'reschedule_date',
-            'is_online',
-            'online_duration',
-            'offline_duration',
-            'room',
-            'new_start_time',
-            'new_end_time',
-        ]
+        fields = ['reschedule_date', 'is_online', 'selected_slot', 'new_start_time', 'new_end_time']
         widgets = {
             'reschedule_date': forms.DateInput(attrs={'type': 'date'}),
-            'online_duration': forms.NumberInput(attrs={'min': 0}),
-            'offline_duration': forms.NumberInput(attrs={'min': 0}),
-            'room': forms.TextInput(attrs={'placeholder': 'Enter room number'}),
             'new_start_time': forms.TimeInput(attrs={'type': 'time'}),
             'new_end_time': forms.TimeInput(attrs={'type': 'time'}),
         }
 
+    def __init__(self, *args, **kwargs):
+        self.class_schedule = kwargs.pop('class_schedule', None)
+        super().__init__(*args, **kwargs)
+
     def clean(self):
         cleaned_data = super().clean()
-        new_start_time = cleaned_data.get('new_start_time')
-        new_end_time = cleaned_data.get('new_end_time')
         is_online = cleaned_data.get('is_online')
-        room = cleaned_data.get('room')
-        online_duration = cleaned_data.get('online_duration')
-        offline_duration = cleaned_data.get('offline_duration')
+        reschedule_date = cleaned_data.get('reschedule_date')
 
-        if new_start_time and new_end_time:
-            if new_start_time >= new_end_time:
-                raise ValidationError("End time must be later than start time.")
+        if not reschedule_date:
+            raise forms.ValidationError("Please select a reschedule date.")
+
+        # Friday=4, Saturday=5
+        weekday = reschedule_date.weekday()
 
         if is_online:
-            if not online_duration or online_duration <= 0:
-                raise ValidationError("Please enter a valid online duration (minutes).")
+            if not cleaned_data.get('new_start_time') or not cleaned_data.get('new_end_time'):
+                raise forms.ValidationError("Online class requires start and end times.")
         else:
-            if not room:
-                raise ValidationError("Please enter the room number for offline classes.")
-            if not offline_duration or offline_duration <= 0:
-                raise ValidationError("Please enter a valid offline duration (minutes).")
+            if weekday in [4, 5]:
+                raise forms.ValidationError("Offline classes are NOT allowed on Friday or Saturday.")
+
+            if not cleaned_data.get('selected_slot'):
+                raise forms.ValidationError("Offline class requires selecting a slot.")
 
         return cleaned_data
-
 
 class TeacherForm(forms.ModelForm):
     class Meta:
